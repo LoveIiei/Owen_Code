@@ -1,6 +1,7 @@
 # owencode — AI Coding Assistant TUI
 
-A terminal UI coding assistant written in Rust, inspired by Claude Code. Supports **Ollama** (local) and **Nvidia NIM** (cloud) as AI backends.
+A terminal UI coding assistant written in Rust, inspired by Claude Code. However it only uses around **13** MB of memory compared to around **330** MB for Claude code.  
+Supports **Ollama** (local) and **Nvidia NIM** (cloud) as AI backends.
 
 ## Features
 
@@ -30,7 +31,7 @@ ollama pull llama3.2
 ### Build & Run
 
 ```bash
-git clone <repo>
+git clone https://github.com/LoveIiei/Owen_Code.git
 cd owencode
 cargo build --release
 ./target/release/ocode
@@ -120,11 +121,11 @@ src/
 
 ## Roadmap
 
-- [ ] Multi-line input editor
+- [ x ] Multi-line input editor
 - [ ] Diff view for file edits
 - [ ] Clipboard support
-- [ ] Command history (↑↓ in input)
-- [ ] Session save/restore
-- [ ] Config hot-reload
+- [ x ] Command history (↑↓ in input)
+- [ x ] Session save/restore
+- [ x ] Config hot-reload
 - [ ] Custom system prompt per session
 - [ ] MCP (Model Context Protocol) tool support

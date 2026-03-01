@@ -447,17 +447,27 @@ impl App {
         }
     }
 
+    /// Scroll up by `amount` visual rows. If currently pinned to the bottom,
+    /// initialise scroll to a large value so the renderer clamps it to the
+    /// real bottom first — meaning the very first keypress moves up immediately.
+    fn scroll_up(&mut self, amount: usize) {
+        if self.pinned {
+            self.pinned = false;
+            self.scroll = usize::MAX / 2; // renderer clamps to visual_rows-viewport
+        }
+        self.scroll = self.scroll.saturating_sub(amount);
+    }
+
+    fn scroll_down(&mut self, amount: usize) {
+        self.pinned = false;
+        self.scroll = self.scroll.saturating_add(amount);
+    }
+
     async fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
         use crossterm::event::{MouseButton, MouseEventKind};
         match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_sub(3);
-            }
-            MouseEventKind::ScrollDown => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_add(3);
-            }
+            MouseEventKind::ScrollUp => self.scroll_up(3),
+            MouseEventKind::ScrollDown => self.scroll_down(3),
             MouseEventKind::Down(MouseButton::Left) => {
                 // Click to enter insert mode if in normal mode
                 if matches!(self.mode, AppMode::Normal) {
@@ -479,24 +489,12 @@ impl App {
             }
             (KeyCode::Char('?'), _) => self.mode = AppMode::Help,
             // Scroll down
-            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_add(3);
-            }
+            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => self.scroll_down(3),
             // Scroll up
-            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_sub(3);
-            }
+            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => self.scroll_up(3),
             // Page scroll
-            (KeyCode::PageDown, _) => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_add(20);
-            }
-            (KeyCode::PageUp, _) => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_sub(20);
-            }
+            (KeyCode::PageDown, _) => self.scroll_down(20),
+            (KeyCode::PageUp, _) => self.scroll_up(20),
             (KeyCode::Char('g'), _) => {
                 self.pinned = false;
                 self.scroll = 0;
@@ -532,22 +530,10 @@ impl App {
             (KeyCode::Esc, _) => self.mode = AppMode::Normal,
 
             // Scroll chat without leaving insert mode
-            (KeyCode::PageUp, _) => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_sub(20);
-            }
-            (KeyCode::PageDown, _) => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_add(20);
-            }
-            (KeyCode::Up, m) if m.contains(KeyModifiers::CONTROL) => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_sub(3);
-            }
-            (KeyCode::Down, m) if m.contains(KeyModifiers::CONTROL) => {
-                self.pinned = false;
-                self.scroll = self.scroll.saturating_add(3);
-            }
+            (KeyCode::PageUp, _) => self.scroll_up(20),
+            (KeyCode::PageDown, _) => self.scroll_down(20),
+            (KeyCode::Up, m) if m.contains(KeyModifiers::CONTROL) => self.scroll_up(3),
+            (KeyCode::Down, m) if m.contains(KeyModifiers::CONTROL) => self.scroll_down(3),
 
             // History navigation: Alt+Up / Alt+Down
             (KeyCode::Up, m) if m.contains(KeyModifiers::ALT) => self.history_prev(),
@@ -1123,4 +1109,3 @@ A planning step runs first and injects context above. If you need more, emit XML
 - After tool results arrive you will be called again to continue your response.
 - Be thorough. If a task needs multiple steps, execute them all.
 "#;
-
