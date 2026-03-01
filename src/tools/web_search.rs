@@ -35,7 +35,7 @@ struct RelatedTopic {
 impl WebSearch {
     pub async fn search(query: &str) -> Result<String> {
         let client = Client::builder()
-            .user_agent("aicode-tui/0.1 (terminal AI assistant)")
+            .user_agent("ocode-tui/0.1 (terminal AI assistant)")
             .timeout(std::time::Duration::from_secs(10))
             .build()?;
 

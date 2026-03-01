@@ -37,7 +37,7 @@ const HELP_TEXT: &[(&str, &str)] = &[
     ("/load <id>", "Load session by ID"),
     ("/model", "Switch AI model"),
     ("/clear", "Clear chat history"),
-    ("/quit", "Exit aicode"),
+    ("/quit", "Exit OwenCode"),
 ];
 
 pub fn draw(f: &mut Frame) {

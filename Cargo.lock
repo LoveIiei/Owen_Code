@@ -9,30 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "aicode"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "crossterm",
- "dirs",
- "futures",
- "futures-util",
- "ratatui",
- "reqwest",
- "serde",
- "serde_json",
- "syntect",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "toml",
- "unicode-width 0.2.0",
-]
-
-[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1009,6 +985,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "ocode"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "crossterm",
+ "dirs",
+ "futures",
+ "futures-util",
+ "ratatui",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "syntect",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "toml",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

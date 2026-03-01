@@ -1,5 +1,4 @@
 use crate::app::{App, AppMode, EntryKind};
-use crate::ai::Role;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -19,8 +18,10 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
         .title(Span::styled(
-            format!(" 🤖 aicode — {} ", app.backend.model()),
-            Style::default().fg(Color::Rgb(150, 100, 255)).add_modifier(Modifier::BOLD),
+            format!(" 🤖 OwenCode — {} ", app.backend.model()),
+            Style::default()
+                .fg(Color::Rgb(150, 100, 255))
+                .add_modifier(Modifier::BOLD),
         ));
 
     let inner = block.inner(area);
@@ -36,21 +37,35 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             EntryKind::User => {
                 let time_str = entry.timestamp.format("%H:%M:%S").to_string();
                 lines.push(Line::from(vec![
-                    Span::styled("╭─ You ", Style::default().fg(USER_COLOR).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "╭─ You ",
+                        Style::default().fg(USER_COLOR).add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(time_str, Style::default().fg(DIM)),
                 ]));
                 render_markdown_lines(&entry.content, USER_COLOR, &mut lines);
-                lines.push(Line::from(Span::styled("╰──────────────────────────────────────", Style::default().fg(Color::Rgb(40, 40, 60)))));
+                lines.push(Line::from(Span::styled(
+                    "╰──────────────────────────────────────",
+                    Style::default().fg(Color::Rgb(40, 40, 60)),
+                )));
                 lines.push(Line::default());
             }
             EntryKind::Assistant => {
                 let time_str = entry.timestamp.format("%H:%M:%S").to_string();
                 lines.push(Line::from(vec![
-                    Span::styled("╭─ Assistant ", Style::default().fg(ASSISTANT_COLOR).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "╭─ Assistant ",
+                        Style::default()
+                            .fg(ASSISTANT_COLOR)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(time_str, Style::default().fg(DIM)),
                 ]));
                 render_markdown_lines(&entry.content, ASSISTANT_COLOR, &mut lines);
-                lines.push(Line::from(Span::styled("╰──────────────────────────────────────", Style::default().fg(Color::Rgb(40, 40, 60)))));
+                lines.push(Line::from(Span::styled(
+                    "╰──────────────────────────────────────",
+                    Style::default().fg(Color::Rgb(40, 40, 60)),
+                )));
                 lines.push(Line::default());
             }
         }
@@ -60,7 +75,12 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     if app.streaming {
         if !app.streaming_buffer.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("╭─ Assistant ", Style::default().fg(ASSISTANT_COLOR).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "╭─ Assistant ",
+                    Style::default()
+                        .fg(ASSISTANT_COLOR)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("⟳ streaming…", Style::default().fg(DIM)),
             ]));
             render_markdown_lines(&app.streaming_buffer, ASSISTANT_COLOR, &mut lines);
@@ -116,7 +136,9 @@ pub fn draw_input(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(border_color))
         .title(Span::styled(
             mode_label,
-            Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
         ))
         .title_bottom(Span::styled(hint, Style::default().fg(DIM)));
 
@@ -156,7 +178,8 @@ pub fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     if is_insert {
         let cursor_col = app.input.lines[app.input.row][..app.input.col].width() as u16;
         let cursor_x = (inner.x + cursor_col).min(inner.x + inner.width.saturating_sub(1));
-        let cursor_y = (inner.y + app.input.row as u16).min(inner.y + inner.height.saturating_sub(1));
+        let cursor_y =
+            (inner.y + app.input.row as u16).min(inner.y + inner.height.saturating_sub(1));
         f.set_cursor_position((cursor_x, cursor_y));
     }
 }
@@ -175,13 +198,21 @@ fn render_tool_card<'a>(content: &str, success: bool, lines: &mut Vec<Line<'a>>)
 
     lines.push(Line::from(vec![
         Span::styled("  ┌─ ", Style::default().fg(border_color)),
-        Span::styled(label.to_string(), Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            label.to_string(),
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
 
     for line in &output {
         lines.push(Line::from(vec![
             Span::styled("  │ ", Style::default().fg(border_color)),
-            Span::styled(line.to_string(), Style::default().fg(Color::Rgb(200, 210, 200)).bg(bg_accent)),
+            Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::Rgb(200, 210, 200)).bg(bg_accent),
+            ),
         ]));
     }
 
@@ -226,7 +257,10 @@ fn render_markdown_lines<'a>(content: &str, accent: Color, lines: &mut Vec<Line<
         if in_code_block {
             lines.push(Line::from(vec![
                 Span::styled("  │ ", Style::default().fg(Color::Rgb(60, 120, 60))),
-                Span::styled(raw_line.to_string(), Style::default().fg(Color::Rgb(200, 220, 200)).bg(CODE_BG)),
+                Span::styled(
+                    raw_line.to_string(),
+                    Style::default().fg(Color::Rgb(200, 220, 200)).bg(CODE_BG),
+                ),
             ]));
             continue;
         }
@@ -235,7 +269,9 @@ fn render_markdown_lines<'a>(content: &str, accent: Color, lines: &mut Vec<Line<
         if raw_line.starts_with("# ") {
             lines.push(Line::from(Span::styled(
                 format!("  {}", &raw_line[2..]),
-                Style::default().fg(accent).add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                Style::default()
+                    .fg(accent)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             )));
             continue;
         }
@@ -249,19 +285,13 @@ fn render_markdown_lines<'a>(content: &str, accent: Color, lines: &mut Vec<Line<
 
         // Bold **text**
         let line_text = render_inline_markdown(raw_line, accent);
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            line_text,
-        ]));
+        lines.push(Line::from(vec![Span::raw("  "), line_text]));
     }
 }
 
 fn render_inline_markdown(text: &str, _accent: Color) -> Span<'static> {
     // Simple fallback: strip ** markers for now
     // Full inline parsing would need to return Vec<Span>
-    let cleaned = text
-        .replace("**", "")
-        .replace("__", "")
-        .replace('`', "'");
+    let cleaned = text.replace("**", "").replace("__", "").replace('`', "'");
     Span::styled(cleaned, Style::default().fg(Color::White))
 }

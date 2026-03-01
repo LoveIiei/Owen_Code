@@ -1,5 +1,5 @@
 [package]
-name = "aicode"
+name = "ocode"
 version = "0.1.0"
 edition = "2021"
 description = "A TUI AI coding assistant supporting Ollama and Nvidia NIM"

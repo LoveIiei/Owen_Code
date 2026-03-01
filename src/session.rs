@@ -9,8 +9,8 @@ use std::path::PathBuf;
 pub struct Session {
     pub id: String,
     pub name: String,
-    pub created_at: DateTime<Local>,
-    pub updated_at: DateTime<Local>,
+    pub created_at: String,
+    pub updated_at: String,
     pub working_dir: String,
     pub backend: String,
     pub model: String,
@@ -28,7 +28,7 @@ pub struct SerializedMessage {
 pub struct SerializedChatEntry {
     pub role: String,
     pub content: String,
-    pub timestamp: DateTime<Local>,
+    pub timestamp: String,
 }
 
 impl Session {
@@ -46,8 +46,8 @@ impl Session {
         Self {
             id,
             name,
-            created_at: now,
-            updated_at: now,
+            created_at: now.to_rfc3339(),
+            updated_at: now.to_rfc3339(),
             working_dir,
             backend,
             model,
@@ -63,7 +63,7 @@ impl Session {
                 .map(|e| SerializedChatEntry {
                     role: role_to_str(&e.role).to_string(),
                     content: e.content.clone(),
-                    timestamp: e.timestamp,
+                    timestamp: e.timestamp.to_rfc3339(),
                 })
                 .collect(),
         }
@@ -82,10 +82,20 @@ impl Session {
     pub fn to_chat_log(&self) -> Vec<ChatEntry> {
         self.chat_log
             .iter()
-            .map(|e| ChatEntry {
-                role: str_to_role(&e.role),
-                content: e.content.clone(),
-                timestamp: e.timestamp,
+            .map(|e| {
+                let role = str_to_role(&e.role);
+                let kind = match role {
+                    Role::User => crate::app::EntryKind::User,
+                    _ => crate::app::EntryKind::Assistant,
+                };
+                ChatEntry {
+                    role,
+                    kind,
+                    content: e.content.clone(),
+                    timestamp: DateTime::parse_from_rfc3339(&e.timestamp)
+                        .map(|dt| dt.with_timezone(&Local))
+                        .unwrap_or_else(|_| Local::now()),
+                }
             })
             .collect()
     }
@@ -113,7 +123,7 @@ impl SessionStore {
     pub fn sessions_dir() -> PathBuf {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("aicode")
+            .join("ocode")
             .join("sessions")
     }
 
@@ -145,7 +155,9 @@ impl SessionStore {
                     sessions.push(SessionMeta {
                         id: session.id,
                         name: session.name,
-                        updated_at: session.updated_at,
+                        updated_at: DateTime::parse_from_rfc3339(&session.updated_at)
+                            .map(|dt| dt.with_timezone(&Local))
+                            .unwrap_or_else(|_| Local::now()),
                         model: session.model,
                         message_count: session.chat_log.len(),
                     });
@@ -153,7 +165,6 @@ impl SessionStore {
             }
         }
 
-        // Sort by most recent first
         sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(sessions)
     }
@@ -171,18 +182,14 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Auto-save with a fixed "last" ID for seamless resume on next launch
     pub fn autosave(session: &mut Session) -> Result<()> {
         let dir = Self::sessions_dir();
         std::fs::create_dir_all(&dir)?;
 
-        session.updated_at = Local::now();
+        session.updated_at = Local::now().to_rfc3339();
 
-        // Save with real ID
         let json = serde_json::to_string_pretty(&session)?;
         std::fs::write(dir.join(format!("{}.json", session.id)), &json)?;
-
-        // Also write a "last" symlink/copy for auto-resume
         std::fs::write(dir.join("_last.json"), json)?;
         Ok(())
     }
@@ -203,3 +210,4 @@ pub struct SessionMeta {
     pub model: String,
     pub message_count: usize,
 }
+

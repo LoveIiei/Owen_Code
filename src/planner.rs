@@ -8,9 +8,10 @@
 //! If the planner decides no tools are needed, it returns `[]`.
 
 use crate::{
-    ai::{NimBackend, OllamaBackend, StreamChunk},
+    ai::{AiBackend, NimBackend, OllamaBackend, StreamChunk},
     config::{Backend, Config},
 };
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -119,7 +120,9 @@ fn build_conversation_summary(messages: &[crate::ai::Message]) -> String {
         return String::new();
     }
 
-    let mut summary = String::from("Recent conversation context (for reference — don't re-fetch what's already here):\n");
+    let mut summary = String::from(
+        "Recent conversation context (for reference — don't re-fetch what's already here):\n",
+    );
     for msg in &recent {
         let role = match msg.role {
             crate::ai::Role::User => "User",
@@ -148,10 +151,8 @@ async fn call_planner_model(prompt: &str, config: &Config) -> Result<String> {
     // Build a planner-specific backend
     match config.planner.backend {
         Backend::Ollama => {
-            let backend = OllamaBackend::new(
-                config.ollama.base_url.clone(),
-                config.planner.model.clone(),
-            );
+            let backend =
+                OllamaBackend::new(config.ollama.base_url.clone(), config.planner.model.clone());
             tokio::spawn(async move {
                 let _ = backend.stream_chat(messages, tx).await;
             });
@@ -202,9 +203,8 @@ fn extract_json_array(raw: &str) -> Result<Vec<PlannedCall>> {
         .ok_or_else(|| anyhow::anyhow!("Unclosed JSON array in planner response"))?;
 
     let json_slice = &stripped[start..=end];
-    let calls: Vec<PlannedCall> = serde_json::from_str(json_slice).map_err(|e| {
-        anyhow::anyhow!("Failed to parse planner JSON: {}\nRaw: {}", e, json_slice)
-    })?;
+    let calls: Vec<PlannedCall> = serde_json::from_str(json_slice)
+        .map_err(|e| anyhow::anyhow!("Failed to parse planner JSON: {}\nRaw: {}", e, json_slice))?;
 
     Ok(calls)
 }

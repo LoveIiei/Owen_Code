@@ -49,7 +49,12 @@ impl ChatEntry {
             Role::Assistant => EntryKind::Assistant,
             Role::System => EntryKind::Assistant,
         };
-        Self { role, kind, content, timestamp: Local::now() }
+        Self {
+            role,
+            kind,
+            content,
+            timestamp: Local::now(),
+        }
     }
 
     pub fn tool(label: String, output: String, success: bool) -> Self {
@@ -74,7 +79,11 @@ pub struct InputBuffer {
 
 impl InputBuffer {
     pub fn new() -> Self {
-        Self { lines: vec![String::new()], row: 0, col: 0 }
+        Self {
+            lines: vec![String::new()],
+            row: 0,
+            col: 0,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -178,9 +187,15 @@ impl InputBuffer {
         }
     }
 
-    pub fn move_home(&mut self) { self.col = 0; }
-    pub fn move_end(&mut self) { self.col = self.lines[self.row].len(); }
-    pub fn line_count(&self) -> usize { self.lines.len() }
+    pub fn move_home(&mut self) {
+        self.col = 0;
+    }
+    pub fn move_end(&mut self) {
+        self.col = self.lines[self.row].len();
+    }
+    pub fn line_count(&self) -> usize {
+        self.lines.len()
+    }
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -195,9 +210,9 @@ pub struct App {
     pub tool_results: Vec<ToolResult>,
 
     // Agent state
-    pub agent_steps: Vec<AgentStep>,          // tool call cards shown in chat
-    pub agent_iteration: u32,                 // current agent loop iteration
-    pub streaming_label: String,              // e.g. "Thinking…" vs "Running tool…"
+    pub agent_steps: Vec<AgentStep>, // tool call cards shown in chat
+    pub agent_iteration: u32,        // current agent loop iteration
+    pub streaming_label: String,     // e.g. "Thinking…" vs "Running tool…"
 
     pub input: InputBuffer,
     pub input_history: Vec<String>,
@@ -308,7 +323,7 @@ impl App {
             app.chat_log.push(ChatEntry::new(
                 Role::Assistant,
                 format!(
-                    "Welcome to **aicode** 🤖\n\nBackend: {} | Model: {}\nWorking dir: {}\n\nPress **[i]** to start typing. Use **Ctrl+Enter** to send, **Enter** for new line.\nType /help for all commands.",
+                    "Welcome to **OwenCode** 🤖\n\nBackend: {} | Model: {}\nWorking dir: {}\n\nPress **[i]** to start typing. Use **Ctrl+Enter** to send, **Enter** for new line.\nType /help for all commands.",
                     app.backend.name(),
                     app.backend.model(),
                     working_dir,
@@ -346,7 +361,11 @@ impl App {
         self.autosave();
 
         disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
         terminal.show_cursor()?;
 
         Ok(())
@@ -355,24 +374,33 @@ impl App {
     // ── Persistence ───────────────────────────────────────────────────────────
 
     fn autosave(&mut self) {
-        self.session.messages = self.messages.iter().map(|m| crate::session::SerializedMessage {
-            role: match m.role {
-                Role::User => "user".to_string(),
-                Role::Assistant => "assistant".to_string(),
-                Role::System => "system".to_string(),
-            },
-            content: m.content.clone(),
-        }).collect();
+        self.session.messages = self
+            .messages
+            .iter()
+            .map(|m| crate::session::SerializedMessage {
+                role: match m.role {
+                    Role::User => "user".to_string(),
+                    Role::Assistant => "assistant".to_string(),
+                    Role::System => "system".to_string(),
+                },
+                content: m.content.clone(),
+            })
+            .collect();
 
-        self.session.chat_log = self.chat_log.iter().map(|e| crate::session::SerializedChatEntry {
-            role: match e.role {
-                Role::User => "user".to_string(),
-                Role::Assistant => "assistant".to_string(),
-                Role::System => "system".to_string(),
-            },
-            content: e.content.clone(),
-            timestamp: e.timestamp,
-        }).collect();
+        self.session.chat_log = self
+            .chat_log
+            .iter()
+            .map(|e| crate::session::SerializedChatEntry {
+                role: match e.role {
+                    Role::User => "user".to_string(),
+                    Role::Assistant => "assistant".to_string(),
+                    Role::System => "system".to_string(),
+                },
+                content: e.content.clone(),
+                // Ensure the .to_rfc3339() conversion is applied here
+                timestamp: e.timestamp.to_rfc3339(),
+            })
+            .collect();
 
         self.session.working_dir = self.working_dir.clone();
         self.session.model = self.backend.model().to_string();
@@ -388,7 +416,9 @@ impl App {
             AppMode::Insert => self.handle_insert_key(key).await,
             AppMode::ModelSelect => self.handle_model_select_key(key).await,
             AppMode::SessionSelect => self.handle_session_select_key(key).await,
-            AppMode::Help => { self.mode = AppMode::Normal; }
+            AppMode::Help => {
+                self.mode = AppMode::Normal;
+            }
         }
     }
 
@@ -398,10 +428,16 @@ impl App {
             (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => self.should_quit = true,
             (KeyCode::Char('i'), _) | (KeyCode::Char('a'), _) => self.mode = AppMode::Insert,
             (KeyCode::Char('m'), _) => self.open_model_select().await,
-            (KeyCode::Char('s'), m) if m.contains(KeyModifiers::CONTROL) => self.save_session_interactive(),
+            (KeyCode::Char('s'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.save_session_interactive()
+            }
             (KeyCode::Char('?'), _) => self.mode = AppMode::Help,
-            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => self.scroll = self.scroll.saturating_add(1),
-            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => self.scroll = self.scroll.saturating_sub(1),
+            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
+                self.scroll = self.scroll.saturating_add(1)
+            }
+            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
+                self.scroll = self.scroll.saturating_sub(1)
+            }
             (KeyCode::Char('g'), _) => self.scroll = 0,
             (KeyCode::Char('G'), _) => self.scroll = u16::MAX,
             _ => {}
@@ -516,7 +552,9 @@ impl App {
     // ── History ───────────────────────────────────────────────────────────────
 
     fn history_prev(&mut self) {
-        if self.input_history.is_empty() { return; }
+        if self.input_history.is_empty() {
+            return;
+        }
         let idx = match self.input_history_idx {
             None => self.input_history.len() - 1,
             Some(0) => 0,
@@ -545,7 +583,11 @@ impl App {
         let text = self.input_history[idx].clone();
         self.input.clear();
         for ch in text.chars() {
-            if ch == '\n' { self.input.insert_newline(); } else { self.input.insert_char(ch); }
+            if ch == '\n' {
+                self.input.insert_newline();
+            } else {
+                self.input.insert_char(ch);
+            }
         }
     }
 
@@ -556,7 +598,8 @@ impl App {
             self.handle_command(input).await;
             return;
         }
-        self.chat_log.push(ChatEntry::new(Role::User, input.clone()));
+        self.chat_log
+            .push(ChatEntry::new(Role::User, input.clone()));
         self.messages.push(Message::user(input));
         self.scroll = u16::MAX;
         self.start_agent().await;
@@ -581,7 +624,9 @@ impl App {
             while let Some(ev) = agent_rx.recv().await {
                 let done = matches!(ev, AgentEvent::Done | AgentEvent::Error(_));
                 let _ = event_tx.send(AppEvent::Agent(ev));
-                if done { break; }
+                if done {
+                    break;
+                }
             }
         });
 
@@ -592,10 +637,7 @@ impl App {
         match event {
             // ── Planner lifecycle ─────────────────────────────────────────────
             AgentEvent::PlannerStarted => {
-                self.streaming_label = format!(
-                    "Planning… [{}]",
-                    self.config.planner.model
-                );
+                self.streaming_label = format!("Planning… [{}]", self.config.planner.model);
                 self.status = self.streaming_label.clone();
             }
 
@@ -604,11 +646,8 @@ impl App {
                     self.streaming_label = format!("Thinking… [{}]", self.backend.model());
                 } else {
                     let names: Vec<&str> = calls.iter().map(|c| c.tool.as_str()).collect();
-                    self.streaming_label = format!(
-                        "Plan: {} tool(s) → {}",
-                        calls.len(),
-                        names.join(", ")
-                    );
+                    self.streaming_label =
+                        format!("Plan: {} tool(s) → {}", calls.len(), names.join(", "));
                 }
                 self.status = self.streaming_label.clone();
             }
@@ -637,7 +676,11 @@ impl App {
             }
 
             // ── Tool starting ─────────────────────────────────────────────────
-            AgentEvent::ToolStart { iteration, name, summary } => {
+            AgentEvent::ToolStart {
+                iteration,
+                name,
+                summary,
+            } => {
                 self.agent_iteration = iteration;
                 self.streaming_label = format!("Tool: {}", summary);
                 self.status = self.streaming_label.clone();
@@ -652,8 +695,16 @@ impl App {
             }
 
             // ── Tool done ─────────────────────────────────────────────────────
-            AgentEvent::ToolDone { iteration, name, output, success } => {
-                if let Some(step) = self.agent_steps.iter_mut().rev()
+            AgentEvent::ToolDone {
+                iteration,
+                name,
+                output,
+                success,
+            } => {
+                if let Some(step) = self
+                    .agent_steps
+                    .iter_mut()
+                    .rev()
                     .find(|s| s.tool == name && s.iteration == iteration)
                 {
                     step.output = output.clone();
@@ -709,9 +760,11 @@ impl App {
     /// after the agent injects tool results.
     fn sync_messages_from_log(&mut self) {
         // Keep the system prompt
-        let system = self.messages.first().cloned().unwrap_or_else(|| {
-            Message::system(SYSTEM_PROMPT.to_string())
-        });
+        let system = self
+            .messages
+            .first()
+            .cloned()
+            .unwrap_or_else(|| Message::system(SYSTEM_PROMPT.to_string()));
 
         let mut msgs = vec![system];
         for entry in &self.chat_log {
@@ -739,14 +792,22 @@ impl App {
             "/save" | "/s" => {
                 let name = if args.is_empty() {
                     format!("Session {}", Local::now().format("%Y-%m-%d %H:%M"))
-                } else { args.to_string() };
+                } else {
+                    args.to_string()
+                };
                 self.save_session(name);
             }
             "/sessions" => self.open_session_select().await,
-            "/new" => { self.autosave(); self.new_session(); }
+            "/new" => {
+                self.autosave();
+                self.new_session();
+            }
             "/load" => {
-                if args.is_empty() { self.open_session_select().await; }
-                else { self.load_session(args).await; }
+                if args.is_empty() {
+                    self.open_session_select().await;
+                } else {
+                    self.load_session(args).await;
+                }
             }
 
             "/clear" => {
@@ -756,13 +817,20 @@ impl App {
             }
 
             "/run" | "/exec" | "/shell" => {
-                if args.is_empty() { self.push_assistant("Usage: /run <command>".into()); return; }
+                if args.is_empty() {
+                    self.push_assistant("Usage: /run <command>".into());
+                    return;
+                }
                 self.status = format!("Running: {}", args);
-                self.chat_log.push(ChatEntry::new(Role::User, format!("$ {}", args)));
+                self.chat_log
+                    .push(ChatEntry::new(Role::User, format!("$ {}", args)));
                 match ShellTool::execute(args, Some(&self.working_dir)).await {
                     Ok(result) => {
                         let icon = if result.success { "✓" } else { "✗" };
-                        self.push_assistant(format!("{} `{}`\n```\n{}\n```", icon, args, result.output));
+                        self.push_assistant(format!(
+                            "{} `{}`\n```\n{}\n```",
+                            icon, args, result.output
+                        ));
                         self.tool_results.push(result);
                     }
                     Err(e) => self.push_assistant(format!("⚠️  Shell error: {}", e)),
@@ -771,24 +839,36 @@ impl App {
                 self.refresh_file_tree().await;
             }
             "/read" | "/cat" => {
-                if args.is_empty() { self.push_assistant("Usage: /read <file>".into()); return; }
+                if args.is_empty() {
+                    self.push_assistant("Usage: /read <file>".into());
+                    return;
+                }
                 match FileTool::read(args).await {
                     Ok(result) => {
                         let preview = if result.output.len() > 2000 {
                             format!("{}\n…(truncated)", &result.output[..2000])
-                        } else { result.output.clone() };
+                        } else {
+                            result.output.clone()
+                        };
                         self.push_assistant(format!("📄 {}\n```\n{}\n```", args, preview));
                         self.messages.push(Message::user(format!(
-                            "File contents of `{}`:\n```\n{}\n```", args, result.output
+                            "File contents of `{}`:\n```\n{}\n```",
+                            args, result.output
                         )));
                     }
                     Err(e) => self.push_assistant(format!("⚠️  Read error: {}", e)),
                 }
             }
             "/ls" | "/dir" => {
-                let path = if args.is_empty() { self.working_dir.clone() } else { args.to_string() };
+                let path = if args.is_empty() {
+                    self.working_dir.clone()
+                } else {
+                    args.to_string()
+                };
                 match FileTool::list_directory(&path).await {
-                    Ok(result) => self.push_assistant(format!("📁 {}\n```\n{}\n```", path, result.output)),
+                    Ok(result) => {
+                        self.push_assistant(format!("📁 {}\n```\n{}\n```", path, result.output))
+                    }
                     Err(e) => self.push_assistant(format!("⚠️  List error: {}", e)),
                 }
             }
@@ -797,8 +877,11 @@ impl App {
                     self.push_assistant(format!("Current directory: {}", self.working_dir));
                     return;
                 }
-                let new_dir = if args.starts_with('/') { args.to_string() }
-                    else { format!("{}/{}", self.working_dir, args) };
+                let new_dir = if args.starts_with('/') {
+                    args.to_string()
+                } else {
+                    format!("{}/{}", self.working_dir, args)
+                };
                 match std::fs::canonicalize(&new_dir) {
                     Ok(path) => {
                         self.working_dir = path.to_string_lossy().to_string();
@@ -810,7 +893,8 @@ impl App {
             }
             _ => {
                 self.push_assistant(format!(
-                    "Unknown command: `{}`. Type /help for available commands.", cmd
+                    "Unknown command: `{}`. Type /help for available commands.",
+                    cmd
                 ));
             }
         }
@@ -865,7 +949,9 @@ impl App {
     async fn open_session_select(&mut self) {
         match SessionStore::list() {
             Ok(sessions) if sessions.is_empty() => {
-                self.push_assistant("No saved sessions. Use /save to save the current session.".into());
+                self.push_assistant(
+                    "No saved sessions. Use /save to save the current session.".into(),
+                );
             }
             Ok(sessions) => {
                 self.session_list = sessions;
@@ -885,8 +971,11 @@ impl App {
             Ok(models) => {
                 self.available_models = models;
                 let current = self.backend.model().to_string();
-                self.selected_model_idx =
-                    self.available_models.iter().position(|m| m == &current).unwrap_or(0);
+                self.selected_model_idx = self
+                    .available_models
+                    .iter()
+                    .position(|m| m == &current)
+                    .unwrap_or(0);
                 self.mode = AppMode::ModelSelect;
                 self.status = "Select a model".to_string();
             }
@@ -907,7 +996,7 @@ impl App {
     }
 }
 
-const SYSTEM_PROMPT: &str = r#"You are aicode, an autonomous AI coding assistant running in a terminal UI.
+const SYSTEM_PROMPT: &str = r#"You are OwenCode, an autonomous AI coding assistant running in a terminal UI.
 You help users write, review, debug, and understand code.
 
 A separate planning step has already gathered relevant context for you (file contents, shell output, search results) and injected it above. Use that information to give a thorough, accurate answer.
