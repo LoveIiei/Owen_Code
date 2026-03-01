@@ -64,7 +64,7 @@ impl Default for Config {
                 default_model: "meta/llama-3.1-70b-instruct".to_string(),
             },
             ui: UiConfig {
-                show_file_tree: true,
+                show_file_tree: false,
                 syntax_highlight: true,
                 mouse_enabled: true,
             },
@@ -139,3 +139,4 @@ impl Config {
         }
     }
 }
+

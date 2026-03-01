@@ -27,7 +27,10 @@ pub struct ToolCall {
 
 impl From<PlannedCall> for ToolCall {
     fn from(p: PlannedCall) -> Self {
-        Self { name: p.tool, args: p.args }
+        Self {
+            name: p.tool,
+            args: p.args,
+        }
     }
 }
 
@@ -48,10 +51,27 @@ pub enum AgentEvent {
     PlannerStarted,
     /// Planner returned a plan (may be empty).
     PlannerDone { calls: Vec<PlannedCall> },
+    /// Agent is requesting user permission before running a dangerous tool.
+    /// The app must respond by sending `true` (allow) or `false` (deny) on the
+    /// provided oneshot channel.
+    PermissionRequest {
+        tool: String,
+        summary: String,
+        tx: std::sync::Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
+    },
     /// A tool is about to be executed.
-    ToolStart { iteration: u32, name: String, summary: String },
+    ToolStart {
+        iteration: u32,
+        name: String,
+        summary: String,
+    },
     /// A tool finished executing.
-    ToolDone { iteration: u32, name: String, output: String, success: bool },
+    ToolDone {
+        iteration: u32,
+        name: String,
+        output: String,
+        success: bool,
+    },
     /// Reasoner started streaming.
     ReasonerStarted,
     /// Streamed token from the reasoner.
@@ -64,18 +84,48 @@ pub enum AgentEvent {
     Error(String),
 }
 
+// ── Permission gating ─────────────────────────────────────────────────────────
+
+/// Tools that require explicit user confirmation before running.
+fn requires_permission(tool_name: &str) -> bool {
+    matches!(tool_name, "run_shell" | "shell" | "bash" | "write_file")
+}
+
+/// Send a PermissionRequest event and block until the user responds.
+/// Returns `true` if the user allowed the action, `false` if denied/timed-out.
+async fn request_permission(
+    tool: &str,
+    summary: &str,
+    event_tx: &mpsc::UnboundedSender<AgentEvent>,
+) -> bool {
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    let shared = std::sync::Arc::new(tokio::sync::Mutex::new(Some(tx)));
+    let _ = event_tx.send(AgentEvent::PermissionRequest {
+        tool: tool.to_string(),
+        summary: summary.to_string(),
+        tx: shared,
+    });
+    // Wait for the UI to respond (user presses y/n)
+    rx.await.unwrap_or(false)
+}
+
 // ── Tool execution ────────────────────────────────────────────────────────────
 
 pub async fn execute_tool(call: &ToolCall, working_dir: &str) -> (String, bool) {
     let resolve = |path: &str| -> String {
-        if path.starts_with('/') { path.to_string() }
-        else { format!("{}/{}", working_dir, path) }
+        if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("{}/{}", working_dir, path)
+        }
     };
 
     match call.name.as_str() {
         "read_file" => {
             let path = call.args.get("path").map(|s| s.as_str()).unwrap_or("");
-            if path.is_empty() { return ("Error: missing path arg".into(), false); }
+            if path.is_empty() {
+                return ("Error: missing path arg".into(), false);
+            }
             match FileTool::read(&resolve(path)).await {
                 Ok(r) => (r.output, r.success),
                 Err(e) => (format!("Error: {e}"), false),
@@ -84,16 +134,24 @@ pub async fn execute_tool(call: &ToolCall, working_dir: &str) -> (String, bool) 
         "write_file" => {
             let path = call.args.get("path").map(|s| s.as_str()).unwrap_or("");
             let content = call.args.get("content").map(|s| s.as_str()).unwrap_or("");
-            if path.is_empty() { return ("Error: missing path arg".into(), false); }
+            if path.is_empty() {
+                return ("Error: missing path arg".into(), false);
+            }
             match FileTool::write(&resolve(path), content).await {
                 Ok(r) => (r.output, r.success),
                 Err(e) => (format!("Error: {e}"), false),
             }
         }
         "run_shell" | "shell" | "bash" => {
-            let cmd = call.args.get("command").or_else(|| call.args.get("cmd"))
-                .map(|s| s.as_str()).unwrap_or("");
-            if cmd.is_empty() { return ("Error: missing command arg".into(), false); }
+            let cmd = call
+                .args
+                .get("command")
+                .or_else(|| call.args.get("cmd"))
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            if cmd.is_empty() {
+                return ("Error: missing command arg".into(), false);
+            }
             match ShellTool::execute(cmd, Some(working_dir)).await {
                 Ok(r) => (r.output, r.success),
                 Err(e) => (format!("Error: {e}"), false),
@@ -101,17 +159,26 @@ pub async fn execute_tool(call: &ToolCall, working_dir: &str) -> (String, bool) 
         }
         "list_dir" | "list_directory" => {
             let path = call.args.get("path").map(|s| s.as_str()).unwrap_or(".");
-            let full = if path.starts_with('/') { path.to_string() }
-                       else { format!("{}/{}", working_dir, path) };
+            let full = if path.starts_with('/') {
+                path.to_string()
+            } else {
+                format!("{}/{}", working_dir, path)
+            };
             match FileTool::list_directory(&full).await {
                 Ok(r) => (r.output, r.success),
                 Err(e) => (format!("Error: {e}"), false),
             }
         }
         "web_search" | "search" => {
-            let query = call.args.get("query").or_else(|| call.args.get("q"))
-                .map(|s| s.as_str()).unwrap_or("");
-            if query.is_empty() { return ("Error: missing query arg".into(), false); }
+            let query = call
+                .args
+                .get("query")
+                .or_else(|| call.args.get("q"))
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            if query.is_empty() {
+                return ("Error: missing query arg".into(), false);
+            }
             match WebSearch::search(query).await {
                 Ok(r) => (r, true),
                 Err(e) => (format!("Search error: {e}"), false),
@@ -121,37 +188,41 @@ pub async fn execute_tool(call: &ToolCall, working_dir: &str) -> (String, bool) 
     }
 }
 
-/// Execute a batch of tool calls in parallel, preserving order in results.
+/// Execute a batch of tool calls, requesting permission for dangerous ones.
 async fn execute_batch(
     calls: &[ToolCall],
     working_dir: &str,
     iteration: u32,
     event_tx: &mpsc::UnboundedSender<AgentEvent>,
 ) -> Vec<(String, String, bool)> {
-    // Fire ToolStart events for all calls
+    let mut out = Vec::new();
+
     for call in calls {
+        let summary = tool_summary(call);
+
+        // Ask permission for shell commands and file writes
+        if requires_permission(&call.name) {
+            let allowed = request_permission(&call.name, &summary, event_tx).await;
+            if !allowed {
+                let _ = event_tx.send(AgentEvent::ToolDone {
+                    iteration,
+                    name: call.name.clone(),
+                    output: "⛔ Denied by user.".to_string(),
+                    success: false,
+                });
+                out.push((call.name.clone(), "Denied by user.".to_string(), false));
+                continue;
+            }
+        }
+
         let _ = event_tx.send(AgentEvent::ToolStart {
             iteration,
             name: call.name.clone(),
-            summary: tool_summary(call),
+            summary: summary.clone(),
         });
-    }
 
-    // Run in parallel
-    let futures: Vec<_> = calls
-        .iter()
-        .map(|call| {
-            let call = call.clone();
-            let wd = working_dir.to_string();
-            async move { execute_tool(&call, &wd).await }
-        })
-        .collect();
+        let (output, success) = execute_tool(call, working_dir).await;
 
-    let results = futures::future::join_all(futures).await;
-
-    // Fire ToolDone events and collect (name, output, success) triples
-    let mut out = Vec::new();
-    for (call, (output, success)) in calls.iter().zip(results) {
         let _ = event_tx.send(AgentEvent::ToolDone {
             iteration,
             name: call.name.clone(),
@@ -160,23 +231,40 @@ async fn execute_batch(
         });
         out.push((call.name.clone(), output, success));
     }
+
     out
 }
 
 pub fn tool_summary(call: &ToolCall) -> String {
     match call.name.as_str() {
-        "read_file" => format!("read {}", call.args.get("path").map(|s| s.as_str()).unwrap_or("?")),
-        "write_file" => format!("write {}", call.args.get("path").map(|s| s.as_str()).unwrap_or("?")),
+        "read_file" => format!(
+            "read {}",
+            call.args.get("path").map(|s| s.as_str()).unwrap_or("?")
+        ),
+        "write_file" => format!(
+            "write {}",
+            call.args.get("path").map(|s| s.as_str()).unwrap_or("?")
+        ),
         "run_shell" | "shell" | "bash" => {
-            let cmd = call.args.get("command").or_else(|| call.args.get("cmd"))
-                .map(|s| s.as_str()).unwrap_or("?");
+            let cmd = call
+                .args
+                .get("command")
+                .or_else(|| call.args.get("cmd"))
+                .map(|s| s.as_str())
+                .unwrap_or("?");
             format!("$ {}", if cmd.len() > 60 { &cmd[..60] } else { cmd })
         }
         "list_dir" | "list_directory" => {
-            format!("ls {}", call.args.get("path").map(|s| s.as_str()).unwrap_or("."))
+            format!(
+                "ls {}",
+                call.args.get("path").map(|s| s.as_str()).unwrap_or(".")
+            )
         }
         "web_search" | "search" => {
-            format!("search: {}", call.args.get("query").map(|s| s.as_str()).unwrap_or("?"))
+            format!(
+                "search: {}",
+                call.args.get("query").map(|s| s.as_str()).unwrap_or("?")
+            )
         }
         other => other.to_string(),
     }
@@ -193,7 +281,10 @@ pub fn parse_tool_calls(text: &str) -> Vec<ToolCall> {
         let Some(tag_end) = rest.find('>') else { break };
         let tag = &rest[..tag_end + 1];
         let name = extract_attr(tag, "name").unwrap_or_default();
-        if name.is_empty() { search = &search[start + 1..]; continue; }
+        if name.is_empty() {
+            search = &search[start + 1..];
+            continue;
+        }
 
         let close = "</tool_call>";
         let Some(end) = rest.find(close) else { break };
@@ -202,7 +293,9 @@ pub fn parse_tool_calls(text: &str) -> Vec<ToolCall> {
         calls.push(ToolCall { name, args });
 
         let advance = start + end + close.len();
-        if advance >= search.len() { break; }
+        if advance >= search.len() {
+            break;
+        }
         search = &search[advance..];
     }
     calls
@@ -216,7 +309,9 @@ pub fn strip_tool_calls(text: &str) -> String {
         let close = "</tool_call>";
         if let Some(end) = rest.find(close) {
             rest = &rest[end + close.len()..];
-        } else { break; }
+        } else {
+            break;
+        }
     }
     result.push_str(rest);
 
@@ -226,7 +321,9 @@ pub fn strip_tool_calls(text: &str) -> String {
     let mut prev_blank = false;
     for line in &lines {
         let blank = line.trim().is_empty();
-        if blank && prev_blank { continue; }
+        if blank && prev_blank {
+            continue;
+        }
         out.push(*line);
         prev_blank = blank;
     }
@@ -245,17 +342,26 @@ fn parse_xml_args(inner: &str) -> HashMap<String, String> {
     let mut rest = inner.trim();
     while let Some(open_start) = rest.find('<') {
         let open_rest = &rest[open_start + 1..];
-        let Some(open_end) = open_rest.find('>') else { break };
+        let Some(open_end) = open_rest.find('>') else {
+            break;
+        };
         let tag_name = &open_rest[..open_end];
-        if tag_name.starts_with('/') { rest = &rest[open_start + 1 + open_end + 1..]; continue; }
+        if tag_name.starts_with('/') {
+            rest = &rest[open_start + 1 + open_end + 1..];
+            continue;
+        }
         let after_open = &open_rest[open_end + 1..];
         let close_tag = format!("</{}>", tag_name);
         if let Some(close_pos) = after_open.find(&close_tag) {
             map.insert(tag_name.to_string(), after_open[..close_pos].to_string());
             let consumed = open_start + 1 + open_end + 1 + close_pos + close_tag.len();
-            if consumed >= rest.len() { break; }
+            if consumed >= rest.len() {
+                break;
+            }
             rest = &rest[consumed..];
-        } else { break; }
+        } else {
+            break;
+        }
     }
     map
 }
@@ -272,7 +378,8 @@ fn build_reasoner(config: &Config) -> Result<Box<dyn AiBackend>> {
             config.nim.base_url.clone(),
             config.nim.api_key.clone(),
             config.nim.default_model.clone(),
-        ).map(|b| Box::new(b) as Box<dyn AiBackend>),
+        )
+        .map(|b| Box::new(b) as Box<dyn AiBackend>),
     }
 }
 
@@ -291,7 +398,7 @@ fn format_tool_results(results: &[(String, String, bool)]) -> String {
 
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
-const MAX_REACTIVE_ROUNDS: u32 = 6;
+const MAX_REACTIVE_ROUNDS: u32 = 20;
 
 pub fn run_agent(
     messages: Vec<Message>,
@@ -313,15 +420,16 @@ pub fn run_agent(
         let _ = event_tx.send(AgentEvent::PlannerStarted);
 
         let planned = planner::plan(user_message, &messages, &file_tree, &config).await;
-        let _ = event_tx.send(AgentEvent::PlannerDone { calls: planned.clone() });
+        let _ = event_tx.send(AgentEvent::PlannerDone {
+            calls: planned.clone(),
+        });
 
         // ── PHASE 2: EXECUTE PLANNED TOOLS (parallel) ─────────────────────────
         let mut all_tool_results: Vec<(String, String, bool)> = Vec::new();
 
         if !planned.is_empty() {
             let planned_calls: Vec<ToolCall> = planned.into_iter().map(Into::into).collect();
-            let batch_results =
-                execute_batch(&planned_calls, &working_dir, 0, &event_tx).await;
+            let batch_results = execute_batch(&planned_calls, &working_dir, 0, &event_tx).await;
             all_tool_results.extend(batch_results);
         }
 
@@ -342,7 +450,10 @@ pub fn run_agent(
         for reactive_round in 0..MAX_REACTIVE_ROUNDS {
             let backend = match build_reasoner(&config) {
                 Ok(b) => b,
-                Err(e) => { let _ = event_tx.send(AgentEvent::Error(e.to_string())); return; }
+                Err(e) => {
+                    let _ = event_tx.send(AgentEvent::Error(e.to_string()));
+                    return;
+                }
             };
 
             let (stream_tx, mut stream_rx) = mpsc::unbounded_channel::<StreamChunk>();
@@ -393,8 +504,10 @@ pub fn run_agent(
             )));
         }
 
-        let _ = event_tx.send(AgentEvent::Error(format!(
-            "Agent hit the reactive round limit ({MAX_REACTIVE_ROUNDS}). Stopping."
+        let _ = event_tx.send(AgentEvent::TurnComplete(format!(
+            "⚠️ Reached the maximum of {MAX_REACTIVE_ROUNDS} tool-use rounds. The task may be incomplete — you can continue by sending a follow-up message."
         )));
+        let _ = event_tx.send(AgentEvent::Done);
     });
 }
+

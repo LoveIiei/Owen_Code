@@ -29,6 +29,13 @@ struct OllamaChatRequest {
     model: String,
     messages: Vec<OllamaMessage>,
     stream: bool,
+    options: OllamaOptions,
+}
+
+#[derive(Serialize)]
+struct OllamaOptions {
+    num_predict: i32,
+    num_ctx: i32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -87,6 +94,10 @@ impl AiBackend for OllamaBackend {
         let body = OllamaChatRequest {
             model: self.model.clone(),
             stream: true,
+            options: OllamaOptions {
+                num_predict: 8192,
+                num_ctx: 32768,
+            },
             messages: messages
                 .iter()
                 .map(|m| OllamaMessage {
@@ -145,3 +156,4 @@ impl AiBackend for OllamaBackend {
         self.model = model;
     }
 }
+

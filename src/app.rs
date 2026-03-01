@@ -25,6 +25,8 @@ pub enum AppMode {
     ModelSelect,
     SessionSelect,
     Help,
+    /// Waiting for user to confirm/deny a tool permission request.
+    Confirm,
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +200,20 @@ impl InputBuffer {
     }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Return the largest byte index ≤ `max` that is a valid UTF-8 char boundary.
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    if max >= s.len() {
+        return s.len();
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -218,7 +234,8 @@ pub struct App {
     pub input_history: Vec<String>,
     pub input_history_idx: Option<usize>,
 
-    pub scroll: u16,
+    pub scroll: usize,
+    pub pinned: bool, // true = auto-scroll to bottom
     pub streaming: bool,
     pub streaming_buffer: String,
 
@@ -231,10 +248,16 @@ pub struct App {
     pub session_list_idx: usize,
 
     pub working_dir: String,
-    pub file_tree: Vec<String>,
-
+    // file_tree removed
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
     pub should_quit: bool,
+
+    /// Pending permission dialog: (tool_name, one_line_summary, response_channel)
+    pub pending_permission: Option<(
+        String,
+        String,
+        std::sync::Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
+    )>,
 }
 
 impl App {
@@ -292,7 +315,8 @@ impl App {
             input: InputBuffer::new(),
             input_history: Vec::new(),
             input_history_idx: None,
-            scroll: u16::MAX,
+            scroll: 0,
+            pinned: true,
             streaming: false,
             streaming_buffer: String::new(),
             status: "Ready".to_string(),
@@ -302,12 +326,11 @@ impl App {
             session_list: Vec::new(),
             session_list_idx: 0,
             working_dir: working_dir.clone(),
-            file_tree: Vec::new(),
+            // file_tree removed
             event_tx: tx,
             should_quit: false,
+            pending_permission: None,
         };
-
-        app.refresh_file_tree().await;
 
         if resumed {
             app.chat_log.push(ChatEntry::new(
@@ -350,7 +373,8 @@ impl App {
             match events.next().await? {
                 AppEvent::Key(key) => self.handle_key(key).await,
                 AppEvent::Agent(ev) => self.handle_agent_event(ev).await,
-                AppEvent::Resize(_, _) | AppEvent::Tick | AppEvent::Mouse(_) => {}
+                AppEvent::Mouse(mouse) => self.handle_mouse(mouse).await,
+                AppEvent::Resize(_, _) | AppEvent::Tick => {}
             }
 
             if self.should_quit {
@@ -416,9 +440,31 @@ impl App {
             AppMode::Insert => self.handle_insert_key(key).await,
             AppMode::ModelSelect => self.handle_model_select_key(key).await,
             AppMode::SessionSelect => self.handle_session_select_key(key).await,
+            AppMode::Confirm => self.handle_confirm_key(key).await,
             AppMode::Help => {
                 self.mode = AppMode::Normal;
             }
+        }
+    }
+
+    async fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_sub(3);
+            }
+            MouseEventKind::ScrollDown => {
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_add(3);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Click to enter insert mode if in normal mode
+                if matches!(self.mode, AppMode::Normal) {
+                    self.mode = AppMode::Insert;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -432,14 +478,32 @@ impl App {
                 self.save_session_interactive()
             }
             (KeyCode::Char('?'), _) => self.mode = AppMode::Help,
+            // Scroll down
             (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-                self.scroll = self.scroll.saturating_add(1)
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_add(3);
             }
+            // Scroll up
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-                self.scroll = self.scroll.saturating_sub(1)
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_sub(3);
             }
-            (KeyCode::Char('g'), _) => self.scroll = 0,
-            (KeyCode::Char('G'), _) => self.scroll = u16::MAX,
+            // Page scroll
+            (KeyCode::PageDown, _) => {
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_add(20);
+            }
+            (KeyCode::PageUp, _) => {
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_sub(20);
+            }
+            (KeyCode::Char('g'), _) => {
+                self.pinned = false;
+                self.scroll = 0;
+            }
+            (KeyCode::Char('G'), _) => {
+                self.pinned = true;
+            }
             _ => {}
         }
     }
@@ -467,6 +531,24 @@ impl App {
             // Escape to normal
             (KeyCode::Esc, _) => self.mode = AppMode::Normal,
 
+            // Scroll chat without leaving insert mode
+            (KeyCode::PageUp, _) => {
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_sub(20);
+            }
+            (KeyCode::PageDown, _) => {
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_add(20);
+            }
+            (KeyCode::Up, m) if m.contains(KeyModifiers::CONTROL) => {
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_sub(3);
+            }
+            (KeyCode::Down, m) if m.contains(KeyModifiers::CONTROL) => {
+                self.pinned = false;
+                self.scroll = self.scroll.saturating_add(3);
+            }
+
             // History navigation: Alt+Up / Alt+Down
             (KeyCode::Up, m) if m.contains(KeyModifiers::ALT) => self.history_prev(),
             (KeyCode::Down, m) if m.contains(KeyModifiers::ALT) => self.history_next(),
@@ -491,6 +573,25 @@ impl App {
                 self.should_quit = true;
             }
             _ => {}
+        }
+    }
+
+    async fn handle_confirm_key(&mut self, key: crossterm::event::KeyEvent) {
+        let response = match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Some(true),
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Some(false),
+            _ => None,
+        };
+        if let Some(allow) = response {
+            if let Some((_, _, tx_arc)) = self.pending_permission.take() {
+                let mut guard = tx_arc.lock().await;
+                if let Some(tx) = guard.take() {
+                    let _ = tx.send(allow);
+                }
+            }
+            self.mode = AppMode::Insert;
+            let verdict = if allow { "✅ Allowed" } else { "⛔ Denied" };
+            self.status = verdict.to_string();
         }
     }
 
@@ -601,7 +702,7 @@ impl App {
         self.chat_log
             .push(ChatEntry::new(Role::User, input.clone()));
         self.messages.push(Message::user(input));
-        self.scroll = u16::MAX;
+        self.pinned = true;
         self.start_agent().await;
     }
 
@@ -616,7 +717,6 @@ impl App {
         let messages = self.messages.clone();
         let config = self.config.clone();
         let working_dir = self.working_dir.clone();
-        let file_tree = self.file_tree.clone();
         let event_tx = self.event_tx.clone();
 
         let (agent_tx, mut agent_rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
@@ -630,12 +730,17 @@ impl App {
             }
         });
 
-        agent::run_agent(messages, config, working_dir, file_tree, agent_tx);
+        agent::run_agent(messages, config, working_dir, vec![], agent_tx);
     }
 
     async fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
-            // ── Planner lifecycle ─────────────────────────────────────────────
+            // ── Permission request ────────────────────────────────────────────
+            AgentEvent::PermissionRequest { tool, summary, tx } => {
+                self.pending_permission = Some((tool.clone(), summary.clone(), tx));
+                self.mode = AppMode::Confirm;
+                self.status = format!("⚠ Permission required: {}", summary);
+            }
             AgentEvent::PlannerStarted => {
                 self.streaming_label = format!("Planning… [{}]", self.config.planner.model);
                 self.status = self.streaming_label.clone();
@@ -668,7 +773,7 @@ impl App {
                 let prose = agent::strip_tool_calls(&full_text);
                 if !prose.is_empty() {
                     self.chat_log.push(ChatEntry::new(Role::Assistant, prose));
-                    self.scroll = u16::MAX;
+                    self.pinned = true;
                 }
                 self.streaming_buffer.clear();
                 self.streaming_label = "Running tools…".to_string();
@@ -691,7 +796,7 @@ impl App {
                     output: String::new(),
                     success: false,
                 });
-                self.scroll = u16::MAX;
+                self.pinned = true;
             }
 
             // ── Tool done ─────────────────────────────────────────────────────
@@ -712,7 +817,8 @@ impl App {
                 }
                 let icon = if success { "✓" } else { "✗" };
                 let preview = if output.len() > 800 {
-                    format!("{}\n…(truncated)", &output[..800])
+                    let end = floor_char_boundary(&output, 800);
+                    format!("{}\n…(truncated)", &output[..end])
                 } else {
                     output.clone()
                 };
@@ -721,7 +827,7 @@ impl App {
                     preview,
                     success,
                 ));
-                self.scroll = u16::MAX;
+                self.pinned = true;
                 self.streaming_label = format!("Thinking… [{}]", self.backend.model());
                 self.status = self.streaming_label.clone();
             }
@@ -739,7 +845,7 @@ impl App {
                 self.streaming = false;
                 self.streaming_label.clear();
                 self.status = "Ready".to_string();
-                self.scroll = u16::MAX;
+                self.pinned = true;
                 self.autosave();
             }
 
@@ -836,7 +942,6 @@ impl App {
                     Err(e) => self.push_assistant(format!("⚠️  Shell error: {}", e)),
                 }
                 self.status = "Ready".to_string();
-                self.refresh_file_tree().await;
             }
             "/read" | "/cat" => {
                 if args.is_empty() {
@@ -846,7 +951,8 @@ impl App {
                 match FileTool::read(args).await {
                     Ok(result) => {
                         let preview = if result.output.len() > 2000 {
-                            format!("{}\n…(truncated)", &result.output[..2000])
+                            let end = floor_char_boundary(&result.output, 2000);
+                            format!("{}\n…(truncated)", &result.output[..end])
                         } else {
                             result.output.clone()
                         };
@@ -886,7 +992,6 @@ impl App {
                     Ok(path) => {
                         self.working_dir = path.to_string_lossy().to_string();
                         self.status = format!("cd: {}", self.working_dir);
-                        self.refresh_file_tree().await;
                     }
                     Err(e) => self.push_assistant(format!("⚠️  cd error: {}", e)),
                 }
@@ -898,7 +1003,7 @@ impl App {
                 ));
             }
         }
-        self.scroll = u16::MAX;
+        self.pinned = true;
     }
 
     // ── Session helpers ───────────────────────────────────────────────────────
@@ -937,9 +1042,8 @@ impl App {
                 self.chat_log = session.to_chat_log();
                 self.working_dir = session.working_dir.clone();
                 self.session = session;
-                self.scroll = u16::MAX;
+                self.pinned = true;
                 self.status = format!("Loaded: {}", name);
-                self.refresh_file_tree().await;
                 self.push_assistant(format!("↩ Loaded session **{}**", name));
             }
             Err(e) => self.status = format!("Failed to load session: {}", e),
@@ -983,35 +1087,40 @@ impl App {
         }
     }
 
-    async fn refresh_file_tree(&mut self) {
-        let dir = self.working_dir.clone();
-        if let Ok(result) = FileTool::list_directory(&dir).await {
-            self.file_tree = result.output.lines().map(|s| s.to_string()).collect();
-        }
-    }
-
     fn push_assistant(&mut self, content: String) {
         self.chat_log.push(ChatEntry::new(Role::Assistant, content));
-        self.scroll = u16::MAX;
+        self.pinned = true;
     }
 }
 
 const SYSTEM_PROMPT: &str = r#"You are OwenCode, an autonomous AI coding assistant running in a terminal UI.
 You help users write, review, debug, and understand code.
 
-A separate planning step has already gathered relevant context for you (file contents, shell output, search results) and injected it above. Use that information to give a thorough, accurate answer.
+## Capabilities
+You have full access to the user's terminal environment via tool calls:
 
-If you need additional information that was NOT gathered in the planning step, you can request more tools reactively using XML tool calls anywhere in your response:
+- **read_file** — Read any file
+- **write_file** — Create or overwrite files
+- **run_shell** — Run ANY shell command: `ls`, `cd`, `grep`, `cargo build`, `git`, `npm`, `python`, `make`, etc.
+- **list_dir** — List directory contents
+- **web_search** — Search the web
 
-<tool_call name="read_file"><path>src/foo.rs</path></tool_call>
-<tool_call name="run_shell"><command>cargo test 2>&1 | tail -20</command></tool_call>
-<tool_call name="write_file"><path>src/foo.rs</path><content>// full content</content></tool_call>
+Shell commands run in the user's working directory. You can chain commands with `&&` or use pipes.
+Before `run_shell` and `write_file` execute, the user is shown a permission prompt and must approve — so use these freely when they help.
+
+## How to use tools
+A planning step runs first and injects context above. If you need more, emit XML tool calls inline:
+
+<tool_call name="read_file"><path>src/main.rs</path></tool_call>
+<tool_call name="run_shell"><command>cargo check 2>&1 | head -30</command></tool_call>
+<tool_call name="write_file"><path>src/foo.rs</path><content>// full file content here</content></tool_call>
 <tool_call name="list_dir"><path>src/</path></tool_call>
-<tool_call name="web_search"><query>tokio spawn blocking docs</query></tool_call>
+<tool_call name="web_search"><query>rust tokio spawn docs</query></tool_call>
 
-Guidelines:
-- Only use reactive tool calls if something critical is missing. The planner should have handled most needs.
-- When editing files, show the complete new file content inside write_file.
-- Keep responses concise. Use markdown code blocks for code.
-- After reactive tool results arrive you will be called again automatically.
+## Guidelines
+- Prefer running actual shell commands over guessing. `cargo check`, `git status`, `ls`, `find` etc. all work.
+- When editing files, always write the **complete** new file content in `write_file` — never partial diffs.
+- After tool results arrive you will be called again to continue your response.
+- Be thorough. If a task needs multiple steps, execute them all.
 "#;
+

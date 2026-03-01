@@ -131,13 +131,27 @@ fn build_conversation_summary(messages: &[crate::ai::Message]) -> String {
         };
         // Truncate long messages so the planner prompt stays compact
         let content = if msg.content.len() > 300 {
-            format!("{}… (truncated)", &msg.content[..300])
+            let end = floor_char_boundary(&msg.content, 300);
+            format!("{}… (truncated)", &msg.content[..end])
         } else {
             msg.content.clone()
         };
         summary.push_str(&format!("[{role}]: {content}\n"));
     }
     summary
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    if max >= s.len() {
+        return s.len();
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 // ── Non-streaming call to the planner ─────────────────────────────────────────

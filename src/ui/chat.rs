@@ -97,15 +97,43 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let content_height = lines.len() as u16;
-    let scroll = if app.scroll == u16::MAX {
-        content_height.saturating_sub(inner.height)
+    // ── Scroll calculation ────────────────────────────────────────────────────
+    //
+    // ratatui's Paragraph::scroll offset is measured in VISUAL rows (after
+    // word-wrap), not logical lines.  Using lines.len() (logical) produces an
+    // offset that is far too small whenever content wraps, causing the viewport
+    // to stay near the top while new content appears off-screen below.
+    //
+    // We compute the true visual row count by summing ceil(line_width / area_width)
+    // for every line, then use that for both pinned-bottom and clamping.
+
+    let area_width = inner.width as usize;
+
+    let visual_rows: usize = lines
+        .iter()
+        .map(|line| {
+            let w = line.width();
+            if area_width == 0 || w == 0 {
+                1
+            } else {
+                (w + area_width - 1) / area_width
+            }
+        })
+        .sum::<usize>()
+        .max(1);
+
+    let viewport = inner.height as usize;
+
+    let scroll_offset: usize = if app.pinned {
+        visual_rows.saturating_sub(viewport)
     } else {
-        app.scroll.min(content_height.saturating_sub(inner.height))
+        app.scroll.min(visual_rows.saturating_sub(viewport))
     };
 
+    let scroll_u16 = scroll_offset.min(u16::MAX as usize) as u16;
+
     let paragraph = Paragraph::new(Text::from(lines))
-        .scroll((scroll, 0))
+        .scroll((scroll_u16, 0))
         .wrap(Wrap { trim: false });
 
     f.render_widget(paragraph, inner);
@@ -126,9 +154,9 @@ pub fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let hint = if is_insert {
-        " Ctrl+Enter: Send  Enter: Newline  Alt+↑↓: History  Esc: Normal "
+        " Ctrl+Enter: Send  Enter: Newline  PgUp/PgDn or Ctrl+↑↓: Scroll  Alt+↑↓: History  Esc: Normal "
     } else {
-        " [i] Insert  [m] Model  [?] Help  [q] Quit  Ctrl+S: Save session "
+        " [i] Insert  [j/k or PgUp/PgDn]: Scroll  [g/G] Top/Bottom  [m] Model  [?] Help  [q] Quit "
     };
 
     let block = Block::default()
@@ -295,3 +323,4 @@ fn render_inline_markdown(text: &str, _accent: Color) -> Span<'static> {
     let cleaned = text.replace("**", "").replace("__", "").replace('`', "'");
     Span::styled(cleaned, Style::default().fg(Color::White))
 }
+

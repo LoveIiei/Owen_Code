@@ -26,7 +26,11 @@ impl NimBackend {
 
         let client = Client::builder().default_headers(headers).build()?;
 
-        Ok(Self { client, base_url, model })
+        Ok(Self {
+            client,
+            base_url,
+            model,
+        })
     }
 }
 
@@ -107,7 +111,7 @@ impl AiBackend for NimBackend {
         let body = ChatRequest {
             model: self.model.clone(),
             stream: true,
-            max_tokens: 4096,
+            max_tokens: 16384,
             temperature: 0.7,
             messages: messages
                 .iter()
