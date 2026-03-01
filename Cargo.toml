@@ -1,0 +1,30 @@
+[package]
+name = "aicode"
+version = "0.1.0"
+edition = "2021"
+description = "A TUI AI coding assistant supporting Ollama and Nvidia NIM"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+toml = "0.8"
+dirs = "5"
+futures-util = "0.3"
+futures = "0.3"
+async-trait = "0.1"
+syntect = "5"
+unicode-width = "0.2"
+chrono = "0.4"
+tokio-util = "0.7"
+bytes = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
